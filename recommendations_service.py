@@ -10,7 +10,7 @@
     python recommendations_service.py
 
 Или с помощью uvicorn:
-    uvicorn app:app --host 0.0.0.0 --port 8000
+    uvicorn app.main:app --host 0.0.0.0 --port 8000
 """
 
 import os

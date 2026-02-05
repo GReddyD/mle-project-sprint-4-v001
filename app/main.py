@@ -5,53 +5,68 @@ FastAPI приложение для сервиса рекомендаций.
 import os
 import logging
 from contextlib import asynccontextmanager
+from typing import Optional
 
 from fastapi import FastAPI, HTTPException
 
-from models import (
+from app.models import (
     RecommendationResponse,
     FeedbackRequest,
     FeedbackResponse,
     HealthResponse
 )
-from store import RecommendationsStore, DataValidationError
-from engine import RecommendationsEngine
+from app.core import RecommendationsStore, DataValidationError, RecommendationsEngine, EngineConfig
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Глобальные объекты
-store = RecommendationsStore()
-engine: RecommendationsEngine = None
+_store: Optional[RecommendationsStore] = None
+_engine: Optional[RecommendationsEngine] = None
+
+
+def get_store() -> RecommendationsStore:
+    """Получить экземпляр хранилища."""
+    global _store
+    if _store is None:
+        _store = RecommendationsStore()
+    return _store
+
+
+def get_engine() -> Optional[RecommendationsEngine]:
+    """Получить экземпляр движка."""
+    return _engine
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifecycle события приложения."""
-    global engine
+    global _store, _engine
 
     # Startup: загружаем данные
     data_path = os.getenv("RECOMMENDATIONS_PATH", "recsys/recommendations")
 
-    # Гиперпараметры движка из переменных окружения
-    recent_tracks_count = int(os.getenv("RECENT_TRACKS_COUNT", "5"))
-    max_history_size = int(os.getenv("MAX_HISTORY_SIZE", "100"))
-    default_k = int(os.getenv("DEFAULT_K", "10"))
+    # Гиперпараметры движка из переменных окружения с валидацией через pydantic
+    try:
+        config = EngineConfig(
+            recent_tracks_count=int(os.getenv("RECENT_TRACKS_COUNT", "5")),
+            max_history_size=int(os.getenv("MAX_HISTORY_SIZE", "100")),
+            default_k=int(os.getenv("DEFAULT_K", "10"))
+        )
+    except ValueError as e:
+        logger.error(f"Ошибка валидации конфигурации: {e}")
+        raise
 
     try:
-        store.load_recommendations(data_path)
-        engine = RecommendationsEngine(
-            store=store,
-            recent_tracks_count=recent_tracks_count,
-            max_history_size=max_history_size,
-            default_k=default_k
-        )
+        _store = RecommendationsStore()
+        _store.load_recommendations(data_path)
+        _engine = RecommendationsEngine(store=_store, config=config)
         logger.info(
             f"Движок инициализирован: "
-            f"recent_tracks_count={recent_tracks_count}, "
-            f"max_history_size={max_history_size}, "
-            f"default_k={default_k}"
+            f"recent_tracks_count={config.recent_tracks_count}, "
+            f"max_history_size={config.max_history_size}, "
+            f"default_k={config.default_k}"
         )
     except (DataValidationError, FileNotFoundError) as e:
         logger.error(f"Ошибка загрузки данных: {e}")
@@ -70,12 +85,13 @@ app = FastAPI(
 
 
 # ============================================================================
-# Эндпоинты API
+# Эндпоинты API (определены здесь для обратной совместимости)
 # ============================================================================
 
 @app.get("/health", response_model=HealthResponse)
 def health_check():
     """Проверка состояния сервиса."""
+    store = get_store()
     if not store.is_loaded():
         raise HTTPException(status_code=503, detail="Service not ready - data not loaded")
 
@@ -101,6 +117,9 @@ def get_recommendations(user_id: int, k: int = 10):
     - **personal**: Персональные ALS (для пользователей без онлайн-истории)
     - **blended**: Смешанные онлайн + офлайн (для пользователей с историей)
     """
+    store = get_store()
+    engine = get_engine()
+
     if not store.is_loaded():
         raise HTTPException(status_code=503, detail="Service not ready - data not loaded")
 
@@ -121,6 +140,9 @@ def add_feedback(user_id: int, feedback: FeedbackRequest):
     После добавления трека в историю, последующие запросы рекомендаций
     будут учитывать этот трек при формировании онлайн-рекомендаций.
     """
+    store = get_store()
+    engine = get_engine()
+
     if not store.is_loaded():
         raise HTTPException(status_code=503, detail="Service not ready - data not loaded")
 

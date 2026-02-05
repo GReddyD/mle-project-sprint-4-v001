@@ -5,8 +5,9 @@
 import logging
 from typing import List
 
-from models import RecommendationResponse
-from store import RecommendationsStore
+from app.models.schemas import RecommendationResponse
+from app.core.store import RecommendationsStore
+from app.core.config import EngineConfig
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ class RecommendationsEngine:
     def __init__(
         self,
         store: RecommendationsStore,
+        config: EngineConfig | None = None,
         recent_tracks_count: int = 5,
         max_history_size: int = 100,
         default_k: int = 10
@@ -40,14 +42,35 @@ class RecommendationsEngine:
 
         Args:
             store: Хранилище рекомендаций
+            config: Конфигурация движка (опционально). Если передан config,
+                    остальные параметры игнорируются.
             recent_tracks_count: Количество последних треков для онлайн-рекомендаций
             max_history_size: Максимальный размер онлайн-истории пользователя
             default_k: Количество рекомендаций по умолчанию
+
+        Raises:
+            ValidationError: Если параметры конфигурации невалидны
         """
         self.store = store
-        self.recent_tracks_count = recent_tracks_count
-        self.max_history_size = max_history_size
-        self.default_k = default_k
+
+        # Используем переданный config или создаём новый с валидацией
+        if config is not None:
+            self._config = config
+        else:
+            self._config = EngineConfig(
+                recent_tracks_count=recent_tracks_count,
+                max_history_size=max_history_size,
+                default_k=default_k
+            )
+
+        self.recent_tracks_count = self._config.recent_tracks_count
+        self.max_history_size = self._config.max_history_size
+        self.default_k = self._config.default_k
+
+    @property
+    def config(self) -> EngineConfig:
+        """Получить текущую конфигурацию движка."""
+        return self._config
 
     def get_recommendations(
         self,

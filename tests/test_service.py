@@ -7,7 +7,7 @@
 3. Пользователь с персональными рекомендациями и онлайн-историей → blended
 
 Запуск:
-    python test_service.py
+    python -m tests.test_service
 
 Результаты сохраняются в test_service.log
 """
